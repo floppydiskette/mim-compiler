@@ -44,8 +44,8 @@ func (c *Context) handleGif(args string) error {
 					// load varB into a temporary register
 					tmpReg, _ := c.FindUnusedTemporaryRegister(RegisterGeneral)
 					c.AddInstruction(&Instruction{
-						Opcode:        "li",
-						Args:          fmt.Sprintf("$t%d, %d", tmpReg, varB),
+						Opcode:        "addi",
+						Args:          fmt.Sprintf("$t%d, $0, %d", tmpReg, varB),
 						RegistersUsed: []uint8{tmpReg},
 					}, false)
 					// beq $s, $t, label
@@ -85,8 +85,8 @@ func (c *Context) handleGif(args string) error {
 								// load varB into a temporary register
 								tmpReg, _ := c.FindUnusedTemporaryRegister(RegisterGeneral)
 								c.AddInstruction(&Instruction{
-									Opcode:        "li",
-									Args:          fmt.Sprintf("$t%d, %d", tmpReg, varB.Value),
+									Opcode:        "addi",
+									Args:          fmt.Sprintf("$t%d, $0, %d", tmpReg, varB.Value),
 									RegistersUsed: []uint8{tmpReg},
 								}, false)
 								// beq $s, $t, label
@@ -104,8 +104,8 @@ func (c *Context) handleGif(args string) error {
 								// load varA into a temporary register
 								tmpReg, _ := c.FindUnusedTemporaryRegister(RegisterGeneral)
 								c.AddInstruction(&Instruction{
-									Opcode:        "li",
-									Args:          fmt.Sprintf("$t%d, %d", tmpReg, varA.Value),
+									Opcode:        "addi",
+									Args:          fmt.Sprintf("$t%d, $0, %d", tmpReg, varA.Value),
 									RegistersUsed: []uint8{tmpReg},
 								}, false)
 								// beq $s, $t, label
@@ -188,8 +188,8 @@ func (c *Context) handleGif(args string) error {
 				characterHolder, _ := c.FindUnusedTemporaryRegister(RegisterCharacterHolder)
 				for i, char := range varB {
 					c.AddInstruction(&Instruction{
-						Opcode:        "li",
-						Args:          fmt.Sprintf("$t%d, %d", characterHolder, char),
+						Opcode:        "addi",
+						Args:          fmt.Sprintf("$t%d, $0, %d", characterHolder, char),
 						RegistersUsed: []uint8{characterHolder},
 					}, false)
 					c.AddInstruction(&Instruction{
@@ -214,8 +214,8 @@ func (c *Context) handleGif(args string) error {
 			// loop iteration register
 			counterRegister, _ := c.FindUnusedTemporaryRegister(RegisterGeneral)
 			c.AddInstruction(&Instruction{
-				Opcode:        "li",
-				Args:          fmt.Sprintf("$t%d, 0", counterRegister),
+				Opcode:        "addi",
+				Args:          fmt.Sprintf("$t%d, $0, 0", counterRegister),
 				RegistersUsed: []uint8{counterRegister},
 			}, false)
 
@@ -263,7 +263,7 @@ func (c *Context) handleGif(args string) error {
 
 			// bge if counter is equal to string length
 			c.AddInstruction(&Instruction{
-				Opcode:        "bge",
+				Opcode:        "beq",
 				Args:          fmt.Sprintf("%s, $t%d, %s", varA.Value, counterRegister, loopName+"-end"),
 				RegistersUsed: nil,
 			}, false)
@@ -326,13 +326,13 @@ func (c *Context) handleLabel(label string) error {
 	if c.DoesLabelExist(label) {
 		return fmt.Errorf("label %s already exists", label)
 	}
-	c.ExistingLabels = append(c.ExistingLabels, label)
 	// remove first character from label
 	label = label[1:]
 	// is length > 0
 	if len(label) <= 0 {
 		return fmt.Errorf("label %s is empty", label)
 	}
+	c.ExistingLabels = append(c.ExistingLabels, label)
 	c.AddInstruction(&Instruction{
 		Opcode:        label + ":",
 		Args:          "",
@@ -408,6 +408,38 @@ func (c *Context) handleLen(args string) error {
 				return nil
 			} else {
 				return fmt.Errorf("len expects a string or a string variable, got %T", value)
+			}
+		}
+	}
+
+	// if still here, check future variables
+	for i, v := range ourProgram.futureVars {
+		if v.Name == argsArray[0] {
+			// if value is an int, set it; otherwise, remove first two characters from value and convert to int
+			if valueInt, ok := value.(uint8); ok {
+				// move from future to variables
+				ourProgram.variables = append(ourProgram.variables, Variable{
+					Name:     v.Name,
+					Value:    valueInt,
+					Constant: true,
+				})
+				// remove from future
+				ourProgram.futureVars = append(ourProgram.futureVars[:i], ourProgram.futureVars[i+1:]...)
+				return nil
+			} else if valueString, ok := value.(string); ok {
+				tmp, err := strconv.Atoi(valueString[2:])
+				if err != nil {
+					return err
+				}
+				// move from future to variables
+				ourProgram.variables = append(ourProgram.variables, Variable{
+					Name:     v.Name,
+					Value:    uint8(tmp),
+					Constant: false,
+				})
+				// remove from future
+				ourProgram.futureVars = append(ourProgram.futureVars[:i], ourProgram.futureVars[i+1:]...)
+				return nil
 			}
 		}
 	}
@@ -525,8 +557,8 @@ func (c *Context) handleAddi(args string) error {
 							// temporary register to hold the value of variable B
 							tmpReg, _ := c.FindUnusedTemporaryRegister(RegisterGeneral)
 							c.AddInstruction(&Instruction{
-								Opcode:        "li",
-								Args:          fmt.Sprintf("$t%d, %d", tmpReg, variable.Value),
+								Opcode:        "addi",
+								Args:          fmt.Sprintf("$t%d, $0, %d", tmpReg, variable.Value),
 								RegistersUsed: []uint8{tmpReg},
 							}, false)
 							// addi $s0, $t0, immediate
