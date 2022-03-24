@@ -89,3 +89,12 @@ func (c *Context) AddInstruction(instruction *Instruction, freeTmp bool) {
 	}
 	c.Instructions = append(c.Instructions, instruction)
 }
+
+func (c *Context) DoesLabelExist(labelB string) bool {
+	for _, labelA := range c.ExistingLabels {
+		if labelA == labelB {
+			return true
+		}
+	}
+	return false
+}

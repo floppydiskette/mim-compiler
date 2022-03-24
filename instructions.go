@@ -6,6 +6,414 @@ import (
 	"strings"
 )
 
+// goto if
+func (c *Context) handleGif(args string) error {
+	// should have three arguments, first being a variable,
+	// second being either a string literal, number literal, or variable, and third being a label
+	argsArray := strings.Split(args, " ")
+	if len(argsArray) != 3 {
+		return fmt.Errorf("invalid number of arguments for gif")
+	}
+	// make sure first argument is a variable or string variable
+	for _, varA := range ourProgram.variables {
+		if argsArray[0] == varA.Name {
+			// is the second argument a string or number literal?
+			if argsArray[1][0] == '"' && argsArray[1][len(argsArray[1])-1] == '"' {
+				// throw error
+				return fmt.Errorf("gif: second argument cannot be a string literal if first arg is a number")
+			} else if varB, ok := strconv.Atoi(argsArray[1]); ok == nil {
+				// is varA constant?
+				if varA.Constant {
+					if varA.Value == uint8(varB) {
+						// add jump instruction
+						c.AddInstruction(&Instruction{
+							Opcode:        "j",
+							Args:          argsArray[2],
+							RegistersUsed: nil,
+						}, false)
+						// add nop
+						c.AddInstruction(&Instruction{
+							Opcode:        "nop",
+							Args:          "",
+							RegistersUsed: nil,
+						}, false)
+						return nil
+					}
+				} else {
+					// varA should be an $s register
+					// load varB into a temporary register
+					tmpReg, _ := c.FindUnusedTemporaryRegister(RegisterGeneral)
+					c.AddInstruction(&Instruction{
+						Opcode:        "li",
+						Args:          fmt.Sprintf("$t%d, %d", tmpReg, varB),
+						RegistersUsed: []uint8{tmpReg},
+					}, false)
+					// beq $s, $t, label
+					c.AddInstruction(&Instruction{
+						Opcode:        "beq",
+						Args:          fmt.Sprintf("$s%d, $t%d, %s", varA.Value, tmpReg, argsArray[2]),
+						RegistersUsed: []uint8{varA.Value, tmpReg},
+					}, false)
+					// free temporary register
+					c.ReleaseTemporaryRegister(tmpReg)
+				}
+			} else {
+				// is second argument a variable?
+				for _, varB := range ourProgram.variables {
+					if argsArray[1] == varB.Name {
+						// is varB constant?
+						if varB.Constant {
+							// is varA constant?
+							if varA.Constant {
+								if varA.Value == varB.Value {
+									// add jump instruction
+									c.AddInstruction(&Instruction{
+										Opcode:        "j",
+										Args:          argsArray[2],
+										RegistersUsed: nil,
+									}, false)
+									// add nop
+									c.AddInstruction(&Instruction{
+										Opcode:        "nop",
+										Args:          "",
+										RegistersUsed: nil,
+									}, false)
+									return nil
+								}
+							} else {
+								// varA should be an $s register
+								// load varB into a temporary register
+								tmpReg, _ := c.FindUnusedTemporaryRegister(RegisterGeneral)
+								c.AddInstruction(&Instruction{
+									Opcode:        "li",
+									Args:          fmt.Sprintf("$t%d, %d", tmpReg, varB.Value),
+									RegistersUsed: []uint8{tmpReg},
+								}, false)
+								// beq $s, $t, label
+								c.AddInstruction(&Instruction{
+									Opcode:        "beq",
+									Args:          fmt.Sprintf("$s%d, $t%d, %s", varA.Value, tmpReg, argsArray[2]),
+									RegistersUsed: []uint8{varA.Value, tmpReg},
+								}, false)
+								c.ReleaseTemporaryRegister(tmpReg)
+							}
+
+						} else {
+							// is varA constant?
+							if varA.Constant {
+								// load varA into a temporary register
+								tmpReg, _ := c.FindUnusedTemporaryRegister(RegisterGeneral)
+								c.AddInstruction(&Instruction{
+									Opcode:        "li",
+									Args:          fmt.Sprintf("$t%d, %d", tmpReg, varA.Value),
+									RegistersUsed: []uint8{tmpReg},
+								}, false)
+								// beq $s, $t, label
+								c.AddInstruction(&Instruction{
+									Opcode:        "beq",
+									Args:          fmt.Sprintf("$s%d, $t%d, %s", varB.Value, tmpReg, argsArray[2]),
+									RegistersUsed: []uint8{varB.Value, tmpReg},
+								}, false)
+								c.ReleaseTemporaryRegister(tmpReg)
+							} else {
+								// varA should be an $s register
+								// varB should be an $s register
+								// beq $s, $s, label
+								c.AddInstruction(&Instruction{
+									Opcode:        "beq",
+									Args:          fmt.Sprintf("$s%d, $s%d, %s", varA.Value, varB.Value, argsArray[2]),
+									RegistersUsed: []uint8{varA.Value, varB.Value},
+								}, false)
+							}
+						}
+					}
+				}
+			}
+			return nil
+		}
+	}
+
+	// if still here, look for a string variable
+	for _, varA := range ourProgram.stringVars {
+		if varA.Name == argsArray[0] {
+			// is varB a string or number literal?
+			needToWriteString := false
+			if argsArray[1][0] == '"' && argsArray[1][len(argsArray[1])-1] == '"' {
+				// if varA is constant, compare
+				if varA.Constant {
+					if varA.Value == argsArray[1][1:len(argsArray)-1] {
+						c.AddInstruction(&Instruction{
+							Opcode:        "j",
+							Args:          argsArray[2],
+							RegistersUsed: nil,
+						}, false)
+						// add nop
+						c.AddInstruction(&Instruction{
+							Opcode:        "nop",
+							Args:          "",
+							RegistersUsed: nil,
+						}, false)
+					}
+				} else {
+					needToWriteString = true
+
+				}
+			} else if _, ok := strconv.Atoi(argsArray[1]); ok == nil {
+				return fmt.Errorf("gif: second argument cannot be a number literal if first arg is a string")
+			} else {
+			}
+			// setup memory beginning register
+			memoryBeginningRegister, _ := c.FindUnusedTemporaryRegister(RegisterMemoryBeginning)
+			c.AddInstruction(&Instruction{
+				Opcode: "lui",
+				Args:   fmt.Sprintf("$t%d, %s", memoryBeginningRegister, "0x2000"),
+				RegistersUsed: []uint8{
+					memoryBeginningRegister,
+				},
+			}, false)
+			if needToWriteString {
+				varB := argsArray[1][1 : len(argsArray)-1]
+				// add varA to $t
+				c.AddInstruction(&Instruction{
+					Opcode: "add",
+					Args:   fmt.Sprintf("$t%d, $t%d, %s", memoryBeginningRegister, memoryBeginningRegister, varA.Value),
+					RegistersUsed: []uint8{
+						memoryBeginningRegister,
+					},
+				}, false)
+
+				// for length of varB, add the following
+				// li $t0, <char at i>
+				// sb, $t0, i(membeginning)
+				characterHolder, _ := c.FindUnusedTemporaryRegister(RegisterCharacterHolder)
+				for i, char := range varB {
+					c.AddInstruction(&Instruction{
+						Opcode:        "li",
+						Args:          fmt.Sprintf("$t%d, %d", characterHolder, char),
+						RegistersUsed: []uint8{characterHolder},
+					}, false)
+					c.AddInstruction(&Instruction{
+						Opcode:        "sb",
+						Args:          fmt.Sprintf("$t%d, %d($t%d)", characterHolder, i, memoryBeginningRegister),
+						RegistersUsed: []uint8{characterHolder, memoryBeginningRegister},
+					}, false)
+				}
+				c.ReleaseTemporaryRegister(characterHolder)
+			}
+
+			// create second memory register
+			memoryRegisterA, _ := c.FindUnusedTemporaryRegister(RegisterGeneral)
+			c.AddInstruction(&Instruction{
+				Opcode: "lui",
+				Args:   fmt.Sprintf("$t%d, %s", memoryBeginningRegister, "0x2000"),
+				RegistersUsed: []uint8{
+					memoryBeginningRegister,
+				},
+			}, false)
+
+			// loop iteration register
+			counterRegister, _ := c.FindUnusedTemporaryRegister(RegisterGeneral)
+			c.AddInstruction(&Instruction{
+				Opcode:        "li",
+				Args:          fmt.Sprintf("$t%d, 0", counterRegister),
+				RegistersUsed: []uint8{counterRegister},
+			}, false)
+
+			// create a new loop to compare the strings
+			loopName := fmt.Sprintf("loop%d", c.LoopCounter)
+			c.LoopCounter++
+			c.AddInstruction(&Instruction{
+				Opcode:        loopName + ":",
+				Args:          "",
+				RegistersUsed: nil,
+			}, false)
+			// two character holders
+			characterA, _ := c.FindUnusedTemporaryRegister(RegisterGeneral)
+			characterB, _ := c.FindUnusedTemporaryRegister(RegisterGeneral)
+			// load characterA & characterB
+			c.AddInstruction(&Instruction{
+				Opcode:        "lb",
+				Args:          fmt.Sprintf("$t%d, 0($t%d)", characterA, memoryRegisterA),
+				RegistersUsed: []uint8{characterA, memoryRegisterA},
+			}, false)
+			c.AddInstruction(&Instruction{
+				Opcode:        "lb",
+				Args:          fmt.Sprintf("$t%d, 0($t%d)", characterB, memoryBeginningRegister),
+				RegistersUsed: []uint8{characterB, memoryBeginningRegister},
+			}, false)
+
+			// compare
+			c.AddInstruction(&Instruction{
+				Opcode:        "bne",
+				Args:          fmt.Sprintf("$t%d, $t%d, %s", characterA, characterB, loopName+"-fail"),
+				RegistersUsed: []uint8{characterB, characterA},
+			}, true)
+
+			// add one to each memory register
+			c.AddInstruction(&Instruction{
+				Opcode:        "addi",
+				Args:          fmt.Sprintf("$t%d, $t%d, 1", memoryBeginningRegister, memoryBeginningRegister),
+				RegistersUsed: []uint8{memoryBeginningRegister},
+			}, false)
+			c.AddInstruction(&Instruction{
+				Opcode:        "addi",
+				Args:          fmt.Sprintf("$t%d, $t%d, 1", memoryRegisterA, memoryRegisterA),
+				RegistersUsed: []uint8{memoryRegisterA},
+			}, false)
+
+			// bge if counter is equal to string length
+			c.AddInstruction(&Instruction{
+				Opcode:        "bge",
+				Args:          fmt.Sprintf("%s, $t%d, %s", varA.Value, counterRegister, loopName+"-end"),
+				RegistersUsed: nil,
+			}, false)
+
+			// add one to counter
+			c.AddInstruction(&Instruction{
+				Opcode:        "addi",
+				Args:          fmt.Sprintf("$t%d, $t%d, 1", counterRegister, counterRegister),
+				RegistersUsed: []uint8{counterRegister},
+			}, false)
+
+			// jump to beginning of loop
+			c.AddInstruction(&Instruction{
+				Opcode:        "j",
+				Args:          loopName,
+				RegistersUsed: nil,
+			}, false)
+			// add nop
+			c.AddInstruction(&Instruction{
+				Opcode:        "nop",
+				Args:          "",
+				RegistersUsed: nil,
+			}, false)
+
+			// other sections
+
+			// success
+			c.AddInstruction(&Instruction{
+				Opcode:        loopName + "-end:",
+				Args:          "",
+				RegistersUsed: nil,
+			}, false)
+
+			// jump to label
+			c.AddInstruction(&Instruction{
+				Opcode:        "j",
+				Args:          argsArray[2],
+				RegistersUsed: nil,
+			}, false)
+
+			// add nop
+			c.AddInstruction(&Instruction{
+				Opcode:        "nop",
+				Args:          "",
+				RegistersUsed: nil,
+			}, false)
+
+			// failure, continue on
+			c.AddInstruction(&Instruction{
+				Opcode:        loopName + "-fail:",
+				Args:          "",
+				RegistersUsed: nil,
+			}, false)
+		}
+	}
+	return nil
+}
+
+func (c *Context) handleLabel(label string) error {
+	if c.DoesLabelExist(label) {
+		return fmt.Errorf("label %s already exists", label)
+	}
+	c.ExistingLabels = append(c.ExistingLabels, label)
+	// remove first character from label
+	label = label[1:]
+	// is length > 0
+	if len(label) <= 0 {
+		return fmt.Errorf("label %s is empty", label)
+	}
+	c.AddInstruction(&Instruction{
+		Opcode:        label + ":",
+		Args:          "",
+		RegistersUsed: nil,
+	}, false)
+	return nil
+}
+
+func (c *Context) handleGoto(args string) error {
+	if !c.DoesLabelExist(args) {
+		return fmt.Errorf("label %s does not exist", args)
+	}
+	c.AddInstruction(&Instruction{
+		Opcode:        "j",
+		Args:          args,
+		RegistersUsed: nil,
+	}, false)
+	// add nop
+	c.AddInstruction(&Instruction{
+		Opcode:        "nop",
+		Args:          "",
+		RegistersUsed: nil,
+	}, false)
+	return nil
+}
+
+func (c *Context) handleLen(args string) error {
+	argsArray := strings.Split(args, " ")
+	var value interface{}
+	if len(argsArray) != 2 {
+		return fmt.Errorf("len expects 2 arguments, got %d", len(argsArray))
+	}
+	// second argument is either a string or a stringVariable
+	if argsArray[1][0] == '"' && argsArray[1][len(argsArray[1])-1] == '"' {
+		// string literal
+		// remove quotes and count the length
+		value = len(argsArray[1][1 : len(argsArray[1])-1])
+	} else {
+		// possibly a string variable, check
+		for _, v := range ourProgram.stringVars {
+			if v.Name == argsArray[1] {
+				// is constant?
+				if v.Constant {
+					value = len(v.Value)
+				} else {
+					// is variable, should be a register holding the length
+					value = v.Value
+				}
+			}
+		}
+	}
+
+	// first arg should be a variable
+	for i, v := range ourProgram.variables {
+		if v.Name == argsArray[0] {
+			// is variable a constant?
+			if v.Constant {
+				// if value isn't an int, change to not constant
+				if _, ok := value.(int); !ok {
+					v.Constant = false
+				}
+			}
+			// if value is an int, set it; otherwise, remove first two characters from value and convert to int
+			if valueInt, ok := value.(uint8); ok {
+				ourProgram.variables[i].Value = valueInt
+				return nil
+			} else if valueString, ok := value.(string); ok {
+				tmp, err := strconv.Atoi(valueString[2:])
+				if err != nil {
+					return err
+				}
+				ourProgram.variables[i].Value = uint8(tmp)
+				return nil
+			} else {
+				return fmt.Errorf("len expects a string or a string variable, got %T", value)
+			}
+		}
+	}
+	return nil
+}
+
 func handleLet(args string) error {
 	// make sure there are two arguments
 	argsArray := strings.Split(args, " ")
@@ -73,7 +481,16 @@ func (c *Context) handleAddi(args string) error {
 			}
 			for i := 0; i < len(ourProgram.variables); i++ {
 				if ourProgram.variables[i].Name == varname {
-					ourProgram.variables[i].Value += uint8(number)
+					// if variable isn't constant, then its value will be an $s register
+					if !ourProgram.variables[i].Constant {
+						c.AddInstruction(&Instruction{
+							Opcode:        "addi",
+							Args:          fmt.Sprintf("$s%d, $s%d, %d", i, i, number),
+							RegistersUsed: []uint8{uint8(i)},
+						}, false)
+					} else {
+						ourProgram.variables[i].Value += uint8(number)
+					}
 					return nil
 				}
 			}
@@ -96,20 +513,48 @@ func (c *Context) handleAddi(args string) error {
 		// todo
 	}
 	// check if variable B is a number (it cannot be a future variable)
-	for _, variable := range ourProgram.variables {
+	for i, variable := range ourProgram.variables {
 		if variable.Name == varBname {
 			// find variable A
-			for _, variableA := range ourProgram.variables {
+			for j, variableA := range ourProgram.variables {
 				if variableA.Name == varAname {
-					// add the two variables
-					tmpResult = int(variable.Value) + varValue
-					// check if the result is a number
-					if tmpResult > 255 {
-						return fmt.Errorf("addi: result is too large")
+					// if variable A is not constant, then its value will be an $s register
+					if !variableA.Constant {
+						// is variable B constant?
+						if variable.Constant {
+							// temporary register to hold the value of variable B
+							tmpReg, _ := c.FindUnusedTemporaryRegister(RegisterGeneral)
+							c.AddInstruction(&Instruction{
+								Opcode:        "li",
+								Args:          fmt.Sprintf("$t%d, %d", tmpReg, variable.Value),
+								RegistersUsed: []uint8{tmpReg},
+							}, false)
+							// addi $s0, $t0, immediate
+							c.AddInstruction(&Instruction{
+								Opcode:        "addi",
+								Args:          fmt.Sprintf("$s%d, $t%d, %d", ourProgram.variables[j].Value, tmpReg, varValue),
+								RegistersUsed: []uint8{uint8(j), tmpReg},
+							}, false)
+							// free the temporary register
+							c.ReleaseTemporaryRegister(tmpReg)
+						} else {
+							c.AddInstruction(&Instruction{
+								Opcode:        "addi",
+								Args:          fmt.Sprintf("$s%d, $s%d, %d", ourProgram.variables[i].Value, ourProgram.variables[j].Value, varValue),
+								RegistersUsed: []uint8{uint8(j), uint8(i)},
+							}, false)
+						}
+					} else {
+						// add the two variables
+						tmpResult = int(variable.Value) + varValue
+						// check if the result is a number
+						if tmpResult > 255 {
+							return fmt.Errorf("addi: result is too large")
+						}
+						// assign the result to the variable
+						variableA.Value = uint8(tmpResult)
+						return nil
 					}
-					// assign the result to the variable
-					variableA.Value = uint8(tmpResult)
-					return nil
 				}
 			}
 			// if we're still here, variable A might be a future variable
@@ -117,8 +562,9 @@ func (c *Context) handleAddi(args string) error {
 			for i, futureVariable := range ourProgram.futureVars {
 				if futureVariable.Name == varAname {
 					ourProgram.variables = append(ourProgram.variables, Variable{
-						Name:  varAname,
-						Value: uint8(variable.Value + uint8(varValue)),
+						Name:     varAname,
+						Value:    variable.Value,
+						Constant: variable.Constant,
 					})
 					ourProgram.futureVars = append(ourProgram.futureVars[:i], ourProgram.futureVars[i+1:]...)
 					return nil
@@ -189,7 +635,7 @@ func (c *Context) handleRead(args string) error {
 		}, false)
 	}
 
-	memoryBeginningRegister, _ := c.FindUnusedTemporaryRegister(RegisterGeneral)
+	memoryBeginningRegister, _ := c.FindUnusedTemporaryRegister(RegisterMemoryBeginning)
 	c.AddInstruction(&Instruction{
 		Opcode: "lui",
 		Args:   fmt.Sprintf("$t%d, %s", memoryBeginningRegister, "0x2000"),

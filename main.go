@@ -8,8 +8,9 @@ import (
 )
 
 type Variable struct {
-	Name  string
-	Value uint8
+	Name     string
+	Value    uint8
+	Constant bool
 }
 
 type StringVariable struct {
@@ -48,6 +49,7 @@ type Context struct {
 	SavedRegistersInUse     []Register
 	Instructions            []*Instruction
 	LoopCounter             int
+	ExistingLabels          []string
 }
 
 type Program struct {
@@ -83,7 +85,17 @@ func parseLine(line string) (string, string) {
 
 // takes in an instruction and its arguments and returns the assembly code for it
 func (c *Context) handleInstruction(instruction string, arguments string) error {
+	// if first character is :, then it is a label
+	if instruction[0] == ':' {
+		return c.handleLabel(instruction)
+	}
 	switch instruction {
+	case "gif":
+		return c.handleGif(arguments)
+	case "goto":
+		return c.handleGoto(arguments)
+	case "len":
+		return c.handleLen(arguments)
 	case "print":
 		return c.handlePrint(arguments)
 	case "read":
